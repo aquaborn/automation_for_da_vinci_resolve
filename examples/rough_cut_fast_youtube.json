@@ -1,0 +1,7 @@
+{
+  "noise_db": "-38dB",
+  "min_silence": 0.8,
+  "keep_before": 0.12,
+  "keep_after": 0.18,
+  "max_cut": 8.0
+}
