@@ -187,16 +187,44 @@ def render_inout_audio(
     custom_name = f"{name_prefix}_{in_frame}_{out_frame}"
 
     render_attempts = [
-        {"format": "wav", "codec": "LinearPCM", "extension": ".wav"},
-        {"format": "mov", "codec": "LinearPCM", "extension": ".mov"},
+        {
+            "name": "wav-empty-codec",
+            "format": "wav",
+            "codec": "",
+            "extension": ".wav",
+            "export_video": False,
+            "settings": {},
+        },
+        {
+            "name": "wave-empty-codec",
+            "format": "Wave",
+            "codec": "",
+            "extension": ".wav",
+            "export_video": False,
+            "settings": {},
+        },
+        {
+            "name": "mov-h264-audio",
+            "format": "mov",
+            "codec": "H264",
+            "extension": ".mov",
+            "export_video": True,
+            "settings": {
+                "VideoQuality": "Least",
+            },
+        },
     ]
     last_settings = None
+    attempt_results = []
     output_path = None
 
     for attempt in render_attempts:
         output_path = output_dir / f"{custom_name}{attempt['extension']}"
+        set_format_result = None
         if hasattr(project, "SetCurrentRenderFormatAndCodec"):
-            project.SetCurrentRenderFormatAndCodec(attempt["format"], attempt["codec"])
+            set_format_result = project.SetCurrentRenderFormatAndCodec(
+                attempt["format"], attempt["codec"]
+            )
 
         settings = {
             "TargetDir": str(output_dir),
@@ -205,18 +233,33 @@ def render_inout_audio(
             "SelectAllFrames": False,
             "MarkIn": in_frame,
             "MarkOut": out_frame,
-            "ExportVideo": False,
+            "ExportVideo": attempt["export_video"],
             "ExportAudio": True,
-            "AudioCodec": attempt["codec"],
             "AudioBitDepth": 24,
             "AudioSampleRate": 48000,
         }
+        settings.update(attempt["settings"])
+        if attempt["codec"]:
+            settings["AudioCodec"] = attempt["codec"]
+
         last_settings = settings
-        if project.SetRenderSettings(settings):
+        set_settings_result = project.SetRenderSettings(settings)
+        attempt_results.append(
+            {
+                "name": attempt["name"],
+                "format": attempt["format"],
+                "codec": attempt["codec"],
+                "set_format": set_format_result,
+                "set_settings": set_settings_result,
+                "settings": settings,
+            }
+        )
+        if set_settings_result:
             break
     else:
         debug_lines = ["Resolve rejected audio render settings."]
         debug_lines.append(f"Last settings: {last_settings}")
+        debug_lines.append(f"Attempts: {attempt_results}")
         if hasattr(project, "GetRenderFormats"):
             try:
                 debug_lines.append(f"Render formats: {project.GetRenderFormats()}")
