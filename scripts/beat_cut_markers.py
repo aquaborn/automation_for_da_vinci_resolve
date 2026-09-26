@@ -22,6 +22,19 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 
+def find_ffmpeg() -> str | None:
+    candidates = [
+        shutil.which("ffmpeg"),
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return str(candidate)
+    return None
+
+
 @dataclass(frozen=True)
 class BeatMarker:
     time: float
@@ -173,13 +186,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def decode_audio(audio_path: Path, sample_rate: int) -> array:
-    if not shutil.which("ffmpeg"):
+    ffmpeg_path = find_ffmpeg()
+    if not ffmpeg_path:
         if audio_path.suffix.lower() == ".wav":
             return decode_wav_pcm(audio_path, sample_rate)
         raise RuntimeError("ffmpeg is not installed or not found in PATH")
 
     command = [
-        "ffmpeg",
+        ffmpeg_path,
         "-hide_banner",
         "-loglevel",
         "error",

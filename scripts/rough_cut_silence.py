@@ -27,6 +27,19 @@ SILENCE_END_RE = re.compile(
 )
 
 
+def find_ffmpeg() -> str | None:
+    candidates = [
+        shutil.which("ffmpeg"),
+        "/opt/homebrew/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return str(candidate)
+    return None
+
+
 @dataclass(frozen=True)
 class SilenceCandidate:
     start: float
@@ -142,11 +155,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def run_ffmpeg_silencedetect(
     audio_path: Path, noise_db: str, min_silence: float
 ) -> str:
-    if not shutil.which("ffmpeg"):
+    ffmpeg_path = find_ffmpeg()
+    if not ffmpeg_path:
         raise RuntimeError("ffmpeg is not installed or not found in PATH")
 
     command = [
-        "ffmpeg",
+        ffmpeg_path,
         "-hide_banner",
         "-nostats",
         "-i",

@@ -309,8 +309,12 @@ def maybe_trim_audio_with_ffmpeg(
     if duration_seconds <= 0:
         raise RuntimeError("In/Out range is empty")
 
+    ffmpeg_path = beat_cut_markers.find_ffmpeg()
+    if not ffmpeg_path:
+        raise RuntimeError("ffmpeg is not installed or not found in PATH")
+
     command = [
-        "ffmpeg",
+        ffmpeg_path,
         "-hide_banner",
         "-loglevel",
         "error",
