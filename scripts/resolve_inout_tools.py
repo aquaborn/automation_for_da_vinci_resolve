@@ -184,21 +184,53 @@ def render_inout_audio(
     wait: bool,
 ) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{name_prefix}_{in_frame}_{out_frame}.wav"
+    custom_name = f"{name_prefix}_{in_frame}_{out_frame}"
 
-    settings = {
-        "TargetDir": str(output_dir),
-        "CustomName": output_path.stem,
-        "SelectAllFrames": False,
-        "MarkIn": in_frame,
-        "MarkOut": out_frame,
-        "ExportVideo": False,
-        "ExportAudio": True,
-        "Format": "wav",
-        "AudioCodec": "Linear PCM",
-    }
-    if not project.SetRenderSettings(settings):
-        raise RuntimeError("Resolve rejected audio render settings")
+    render_attempts = [
+        {"format": "wav", "codec": "LinearPCM", "extension": ".wav"},
+        {"format": "mov", "codec": "LinearPCM", "extension": ".mov"},
+    ]
+    last_settings = None
+    output_path = None
+
+    for attempt in render_attempts:
+        output_path = output_dir / f"{custom_name}{attempt['extension']}"
+        if hasattr(project, "SetCurrentRenderFormatAndCodec"):
+            project.SetCurrentRenderFormatAndCodec(attempt["format"], attempt["codec"])
+
+        settings = {
+            "TargetDir": str(output_dir),
+            "CustomName": custom_name,
+            "UniqueFilenameStyle": 0,
+            "SelectAllFrames": False,
+            "MarkIn": in_frame,
+            "MarkOut": out_frame,
+            "ExportVideo": False,
+            "ExportAudio": True,
+            "AudioCodec": attempt["codec"],
+            "AudioBitDepth": 24,
+            "AudioSampleRate": 48000,
+        }
+        last_settings = settings
+        if project.SetRenderSettings(settings):
+            break
+    else:
+        debug_lines = ["Resolve rejected audio render settings."]
+        debug_lines.append(f"Last settings: {last_settings}")
+        if hasattr(project, "GetRenderFormats"):
+            try:
+                debug_lines.append(f"Render formats: {project.GetRenderFormats()}")
+            except Exception as error:
+                debug_lines.append(f"GetRenderFormats failed: {error}")
+        if hasattr(project, "GetRenderCodecs"):
+            for format_name in ("wav", "mov"):
+                try:
+                    debug_lines.append(
+                        f"Render codecs for {format_name}: {project.GetRenderCodecs(format_name)}"
+                    )
+                except Exception as error:
+                    debug_lines.append(f"GetRenderCodecs({format_name}) failed: {error}")
+        raise RuntimeError("\n".join(debug_lines))
 
     job_id = project.AddRenderJob()
     if not job_id:
@@ -211,7 +243,10 @@ def render_inout_audio(
         while project.IsRenderingInProgress():
             time.sleep(1.0)
 
-    if not output_path.exists():
+    if output_path is None or not output_path.exists():
+        candidates = sorted(output_dir.glob(f"{custom_name}.*"))
+        if candidates:
+            return candidates[0]
         raise RuntimeError(
             f"Resolve render finished, but expected file was not found: {output_path}"
         )
