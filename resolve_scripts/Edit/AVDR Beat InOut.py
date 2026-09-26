@@ -3,17 +3,20 @@
 
 from __future__ import annotations
 
-import subprocess
 import sys
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS_DIR = REPO_ROOT / "scripts"
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+import resolve_inout_tools
 
 
 def main() -> int:
-    command = [
-        sys.executable,
+    sys.argv = [
         str(REPO_ROOT / "scripts" / "resolve_inout_tools.py"),
         "beat",
         "--render-audio",
@@ -22,12 +25,7 @@ def main() -> int:
         "--timeline-fps",
         "25",
     ]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-    return result.returncode
+    return resolve_inout_tools.main()
 
 
 if __name__ == "__main__":
