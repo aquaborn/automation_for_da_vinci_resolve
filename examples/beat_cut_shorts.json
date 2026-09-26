@@ -1,0 +1,14 @@
+{
+  "sample_rate": 22050,
+  "hop_size": 256,
+  "bpm_min": 70,
+  "bpm_max": 190,
+  "beats_per_bar": 4,
+  "cut_every_beats": 2,
+  "max_markers": 500,
+  "marker_duration_frames": 1,
+  "marker_color": "Blue",
+  "strong_marker_color": "Cyan",
+  "cut_marker_color": "Yellow",
+  "drop_marker_color": "Red"
+}
