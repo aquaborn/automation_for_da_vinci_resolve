@@ -452,6 +452,10 @@ def command_beat(args: argparse.Namespace) -> int:
     beats_per_bar = int(args.beats_per_bar or config.get("beats_per_bar", 4))
     cut_every_beats = int(args.cut_every_beats or config.get("cut_every_beats", 2))
     max_markers = int(args.max_markers or config.get("max_markers", 500))
+    marker_strategy = str(config.get("marker_strategy", "onset_peaks"))
+    onset_peak_percentile = float(config.get("onset_peak_percentile", 0.65))
+    drop_peak_percentile = float(config.get("drop_peak_percentile", 0.93))
+    drop_peak_multiplier = float(config.get("drop_peak_multiplier", 1.6))
     marker_duration_frames = int(
         args.marker_duration_frames or config.get("marker_duration_frames", 1)
     )
@@ -462,18 +466,30 @@ def command_beat(args: argparse.Namespace) -> int:
     bpm, beat_lag = beat_cut_markers.estimate_tempo(
         novelty, sample_rate, hop_size, bpm_min, bpm_max
     )
-    phase = beat_cut_markers.choose_phase(energies, novelty, beat_lag)
-    markers = beat_cut_markers.build_markers(
-        energies,
-        novelty,
-        beat_lag,
-        phase,
-        sample_rate,
-        hop_size,
-        beats_per_bar,
-        cut_every_beats,
-        max_markers,
-    )
+    if marker_strategy == "onset_peaks":
+        markers = beat_cut_markers.build_onset_markers(
+            energies,
+            novelty,
+            sample_rate,
+            hop_size,
+            onset_peak_percentile,
+            drop_peak_percentile,
+            drop_peak_multiplier,
+            max_markers,
+        )
+    else:
+        phase = beat_cut_markers.choose_phase(energies, novelty, beat_lag)
+        markers = beat_cut_markers.build_markers(
+            energies,
+            novelty,
+            beat_lag,
+            phase,
+            sample_rate,
+            hop_size,
+            beats_per_bar,
+            cut_every_beats,
+            max_markers,
+        )
     marker_type_filter = get_marker_type_filter(config)
     unfiltered_marker_count = len(markers)
     markers = beat_cut_markers.filter_markers(
@@ -512,6 +528,7 @@ def command_beat(args: argparse.Namespace) -> int:
     print(f"In/Out frames: {in_frame}-{out_frame}")
     print(f"Audio analyzed: {audio_path}")
     print(f"Estimated BPM: {bpm:.2f}")
+    print(f"Marker strategy: {marker_strategy}")
     print(f"Beat markers found: {unfiltered_marker_count}")
     if marker_type_filter:
         print(f"Marker type filter: {sorted(marker_type_filter)}")

@@ -76,6 +76,10 @@ def load_config_defaults(argv: list[str]) -> dict[str, object]:
         "max_markers",
         "include_marker_types",
         "min_marker_spacing_seconds",
+        "marker_strategy",
+        "onset_peak_percentile",
+        "drop_peak_percentile",
+        "drop_peak_multiplier",
     }
     unknown_keys = sorted(set(config) - allowed_keys)
     if unknown_keys:
@@ -142,6 +146,30 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=int,
         default=int(config_defaults.get("max_markers", 500)),
         help="Maximum markers to write/add",
+    )
+    parser.add_argument(
+        "--marker-strategy",
+        choices=["onset_peaks", "beat_grid"],
+        default=str(config_defaults.get("marker_strategy", "onset_peaks")),
+        help="onset_peaks follows actual waveform attacks; beat_grid uses estimated BPM",
+    )
+    parser.add_argument(
+        "--onset-peak-percentile",
+        type=float,
+        default=float(config_defaults.get("onset_peak_percentile", 0.65)),
+        help="Minimum local onset peak percentile for onset_peaks",
+    )
+    parser.add_argument(
+        "--drop-peak-percentile",
+        type=float,
+        default=float(config_defaults.get("drop_peak_percentile", 0.93)),
+        help="Peak percentile that becomes a DROP marker",
+    )
+    parser.add_argument(
+        "--drop-peak-multiplier",
+        type=float,
+        default=float(config_defaults.get("drop_peak_multiplier", 1.6)),
+        help="DROP marker must also exceed onset threshold by this multiplier",
     )
     parser.add_argument(
         "--add-resolve-markers",
@@ -489,6 +517,62 @@ def build_markers(
     return markers
 
 
+def build_onset_markers(
+    energies: list[float],
+    novelty: list[float],
+    sample_rate: int,
+    hop_size: int,
+    onset_peak_percentile: float,
+    drop_peak_percentile: float,
+    drop_peak_multiplier: float,
+    max_markers: int,
+) -> list[BeatMarker]:
+    if len(novelty) < 3:
+        return []
+
+    positive_novelty = [value for value in novelty if value > 0]
+    if not positive_novelty:
+        return []
+
+    onset_threshold = percentile(positive_novelty, onset_peak_percentile)
+    drop_threshold = percentile(positive_novelty, drop_peak_percentile)
+    peak_frames: list[tuple[int, float]] = []
+
+    for frame_index in range(1, len(novelty) - 1):
+        current = novelty[frame_index]
+        if current < onset_threshold:
+            continue
+        if current < novelty[frame_index - 1] or current < novelty[frame_index + 1]:
+            continue
+        peak_frames.append((frame_index, current))
+        if len(peak_frames) >= max_markers:
+            break
+
+    if not peak_frames:
+        return []
+
+    peak_values = [current for _, current in peak_frames]
+    median_peak = percentile(peak_values, 0.5)
+    drop_floor = max(drop_threshold, median_peak * drop_peak_multiplier)
+
+    markers: list[BeatMarker] = []
+    for frame_index, current in peak_frames:
+        energy = energies[frame_index] if frame_index < len(energies) else 0.0
+        marker_type = "DROP" if current >= drop_floor else "CUT_POINT"
+        label = "DROP?" if marker_type == "DROP" else "CUT POINT"
+        markers.append(
+            BeatMarker(
+                time=round(frame_index * hop_size / sample_rate, 3),
+                marker_type=marker_type,
+                label=label,
+                strength=round(current + energy, 6),
+                beat_index=len(markers),
+            )
+        )
+
+    return markers
+
+
 def seconds_to_timecode(seconds: float) -> str:
     total_ms = round(seconds * 1000)
     hours, remainder = divmod(total_ms, 3_600_000)
@@ -680,18 +764,30 @@ def main() -> int:
         bpm, beat_lag = estimate_tempo(
             novelty, args.sample_rate, args.hop_size, args.bpm_min, args.bpm_max
         )
-        phase = choose_phase(energies, novelty, beat_lag)
-        markers = build_markers(
-            energies,
-            novelty,
-            beat_lag,
-            phase,
-            args.sample_rate,
-            args.hop_size,
-            args.beats_per_bar,
-            args.cut_every_beats,
-            args.max_markers,
-        )
+        if args.marker_strategy == "onset_peaks":
+            markers = build_onset_markers(
+                energies,
+                novelty,
+                args.sample_rate,
+                args.hop_size,
+                args.onset_peak_percentile,
+                args.drop_peak_percentile,
+                args.drop_peak_multiplier,
+                args.max_markers,
+            )
+        else:
+            phase = choose_phase(energies, novelty, beat_lag)
+            markers = build_markers(
+                energies,
+                novelty,
+                beat_lag,
+                phase,
+                args.sample_rate,
+                args.hop_size,
+                args.beats_per_bar,
+                args.cut_every_beats,
+                args.max_markers,
+            )
         marker_type_filter = marker_type_filter_from_config(args.config)
         unfiltered_marker_count = len(markers)
         min_marker_spacing_seconds = 0.0
@@ -706,6 +802,7 @@ def main() -> int:
         json_path, csv_path = write_reports(audio_path, args.output_dir, markers, bpm, args)
 
         print(f"Estimated BPM: {bpm:.2f}")
+        print(f"Marker strategy: {args.marker_strategy}")
         print(f"Markers: {unfiltered_marker_count}")
         if marker_type_filter:
             print(f"Marker type filter: {sorted(marker_type_filter)}")
