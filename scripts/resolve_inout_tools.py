@@ -175,6 +175,19 @@ def load_config(config_path: Path | None) -> dict[str, Any]:
         return json.load(config_file)
 
 
+def get_marker_type_filter(config: dict[str, Any]) -> set[str] | None:
+    value = config.get("include_marker_types")
+    if not value:
+        return None
+    if not isinstance(value, list):
+        raise RuntimeError("include_marker_types must be a JSON array")
+    return {str(item).upper() for item in value}
+
+
+def get_min_marker_spacing(config: dict[str, Any]) -> float:
+    return float(config.get("min_marker_spacing_seconds", 0.0))
+
+
 def render_inout_audio(
     project: Any,
     in_frame: int,
@@ -461,6 +474,11 @@ def command_beat(args: argparse.Namespace) -> int:
         cut_every_beats,
         max_markers,
     )
+    marker_type_filter = get_marker_type_filter(config)
+    unfiltered_marker_count = len(markers)
+    markers = beat_cut_markers.filter_markers(
+        markers, marker_type_filter, get_min_marker_spacing(config)
+    )
 
     color_by_type = {
         "BEAT": str(args.marker_color or config.get("marker_color", "Blue")),
@@ -494,7 +512,10 @@ def command_beat(args: argparse.Namespace) -> int:
     print(f"In/Out frames: {in_frame}-{out_frame}")
     print(f"Audio analyzed: {audio_path}")
     print(f"Estimated BPM: {bpm:.2f}")
-    print(f"Beat markers found: {len(markers)}")
+    print(f"Beat markers found: {unfiltered_marker_count}")
+    if marker_type_filter:
+        print(f"Marker type filter: {sorted(marker_type_filter)}")
+        print(f"Beat markers after filter: {len(markers)}")
     print(f"Resolve markers added: {added}")
     return 0
 

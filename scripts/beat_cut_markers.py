@@ -74,6 +74,8 @@ def load_config_defaults(argv: list[str]) -> dict[str, object]:
         "drop_marker_color",
         "timeline_fps",
         "max_markers",
+        "include_marker_types",
+        "min_marker_spacing_seconds",
     }
     unknown_keys = sorted(set(config) - allowed_keys)
     if unknown_keys:
@@ -183,6 +185,58 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Timeline FPS fallback for Resolve markers if API cannot read it",
     )
     return parser.parse_args(argv)
+
+
+def marker_type_filter_from_config(config_path: Path | None) -> set[str] | None:
+    if not config_path:
+        return None
+    resolved = config_path.expanduser().resolve()
+    if not resolved.exists():
+        return None
+    with resolved.open(encoding="utf-8") as config_file:
+        config = json.load(config_file)
+    value = config.get("include_marker_types")
+    if not value:
+        return None
+    if not isinstance(value, list):
+        raise RuntimeError("include_marker_types must be a JSON array")
+    return {str(item).upper() for item in value}
+
+
+def filter_markers(
+    markers: list[BeatMarker],
+    include_marker_types: set[str] | None,
+    min_spacing_seconds: float,
+) -> list[BeatMarker]:
+    filtered = [
+        marker
+        for marker in markers
+        if include_marker_types is None or marker.marker_type in include_marker_types
+    ]
+    if min_spacing_seconds <= 0:
+        return filtered
+
+    priority = {
+        "DROP": 3,
+        "CUT_POINT": 2,
+        "STRONG_BEAT": 1,
+        "BEAT": 0,
+    }
+    kept: list[BeatMarker] = []
+    for marker in filtered:
+        if not kept or marker.time - kept[-1].time >= min_spacing_seconds:
+            kept.append(marker)
+            continue
+
+        previous = kept[-1]
+        marker_priority = priority.get(marker.marker_type, 0)
+        previous_priority = priority.get(previous.marker_type, 0)
+        if marker_priority > previous_priority or (
+            marker_priority == previous_priority and marker.strength > previous.strength
+        ):
+            kept[-1] = marker
+
+    return kept
 
 
 def decode_audio(audio_path: Path, sample_rate: int) -> array:
@@ -638,10 +692,24 @@ def main() -> int:
             args.cut_every_beats,
             args.max_markers,
         )
+        marker_type_filter = marker_type_filter_from_config(args.config)
+        unfiltered_marker_count = len(markers)
+        min_marker_spacing_seconds = 0.0
+        if args.config:
+            with args.config.expanduser().resolve().open(encoding="utf-8") as config_file:
+                min_marker_spacing_seconds = float(
+                    json.load(config_file).get("min_marker_spacing_seconds", 0.0)
+                )
+        markers = filter_markers(
+            markers, marker_type_filter, min_marker_spacing_seconds
+        )
         json_path, csv_path = write_reports(audio_path, args.output_dir, markers, bpm, args)
 
         print(f"Estimated BPM: {bpm:.2f}")
-        print(f"Markers: {len(markers)}")
+        print(f"Markers: {unfiltered_marker_count}")
+        if marker_type_filter:
+            print(f"Marker type filter: {sorted(marker_type_filter)}")
+            print(f"Markers after filter: {len(markers)}")
         print(f"Cut points: {sum(1 for marker in markers if marker.marker_type == 'CUT_POINT')}")
         print(f"Drops/peaks: {sum(1 for marker in markers if marker.marker_type == 'DROP')}")
         print(f"JSON report: {json_path}")
