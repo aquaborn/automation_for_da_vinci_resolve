@@ -62,6 +62,51 @@ python3 scripts/rough_cut_silence.py /path/to/timeline_audio.wav \
 | `keep_after` | Сколько секунд оставить после окончания речи. | Увеличь, если скрипт съедает дыхание или естественный хвост фразы. |
 | `max_cut` | Максимальная длина предлагаемого выреза. | Уменьши, если длинные паузы лучше проверять руками. |
 
+## Паузы речи через Whisper
+
+Скрипт `scripts/speech_pause_markers.py` ищет не просто тишину, а паузы между
+словами по Whisper word timestamps.
+
+Что умеет:
+
+- находит паузы между словами;
+- помечает протяжные `эээ`, `ааа`, `ммм`, `ууу`, `иии`;
+- помечает длинные слова-паразиты вроде `ну`, `типа`, `короче`;
+- пишет отчеты в `json` и `csv`;
+- через Resolve-команду ставит маркеры внутри текущего `In/Out`.
+
+Для работы нужен один Whisper-бэкенд. Рекомендуемый вариант:
+
+```bash
+python3 -m pip install faster-whisper
+```
+
+Запуск вручную:
+
+```bash
+python3 scripts/speech_pause_markers.py /path/to/voice.wav \
+  --config examples/speech_pauses_russian.json
+```
+
+Цвета маркеров:
+
+- желтый `SPEECH PAUSE` - пауза между словами;
+- оранжевый `FILLER` - слово-паразит или протяжный звук;
+- красный `LONG FILLER` - особенно длинный протяжный звук.
+
+Главные настройки `examples/speech_pauses_russian.json`:
+
+| Параметр | Что делает | Как настраивать |
+| --- | --- | --- |
+| `model` | Модель Whisper. | `small` - хороший старт, `base` быстрее, `medium` точнее. |
+| `language` | Язык речи. | Для русского `ru`. |
+| `min_pause` | Минимальная пауза между словами. | Уменьши, если нужно ловить короткие паузы. |
+| `max_pause` | Максимальная пауза-кандидат. | Больше значения могут быть сценными разрывами. |
+| `keep_before` | Сколько оставить перед следующим словом. | Защищает начало следующего слова от слишком близкого реза. |
+| `keep_after` | Сколько оставить после предыдущего слова. | Защищает хвост предыдущей фразы. |
+| `long_filler` | Минимальная длина слова-паразита. | Уменьши, если нужно ловить короткие `эээ`. |
+| `filler_words` | Список слов-паразитов. | Можно дополнять под стиль речи. |
+
 ## Монтажный ритм по музыке
 
 Второй MVP лежит в `scripts/beat_cut_markers.py`.
@@ -140,21 +185,21 @@ Resolve.
 3. Экспортируй аудио ровно этого диапазона в WAV.
 4. Запусти один из режимов ниже.
 
-Поставить маркеры тишины внутри текущего `In/Out`:
-
-```bash
-python3 scripts/resolve_inout_tools.py silence \
-  --audio /path/to/inout_audio.wav \
-  --config examples/rough_cut_fast_youtube.json \
-  --timeline-fps 25
-```
-
 Поставить beat/cut-маркеры внутри текущего `In/Out`:
 
 ```bash
 python3 scripts/resolve_inout_tools.py beat \
   --audio /path/to/inout_music.wav \
   --config examples/beat_cut_shorts.json \
+  --timeline-fps 25
+```
+
+Поставить Whisper-маркеры пауз речи внутри текущего `In/Out`:
+
+```bash
+python3 scripts/resolve_inout_tools.py speech \
+  --audio /path/to/inout_voice.wav \
+  --config examples/speech_pauses_russian.json \
   --timeline-fps 25
 ```
 
@@ -197,7 +242,7 @@ python3 scripts/install_resolve_menu_scripts.py
 После установки перезапусти DaVinci Resolve. В меню должны появиться:
 
 - `Workspace > Scripts > Edit > AVDR Beat InOut`
-- `Workspace > Scripts > Edit > AVDR Silence InOut`
+- `Workspace > Scripts > Edit > AVDR Speech Pauses InOut`
 
 Горячие клавиши можно назначить через `DaVinci Resolve > Keyboard Customization`,
 найдя эти команды по названию.

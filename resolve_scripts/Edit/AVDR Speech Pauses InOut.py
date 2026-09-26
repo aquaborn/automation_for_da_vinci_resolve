@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Resolve menu launcher: add silence cut markers to the current In/Out range."""
+"""Resolve menu launcher: add Whisper speech pause markers to current In/Out."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def main() -> int:
     LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
     with LOG_PATH.open("a", encoding="utf-8") as log_file:
         with contextlib.redirect_stdout(log_file), contextlib.redirect_stderr(log_file):
-            print(f"\n[{datetime.now().isoformat(timespec='seconds')}] AVDR Silence InOut")
+            print(f"\n[{datetime.now().isoformat(timespec='seconds')}] AVDR Speech Pauses InOut")
             print(f"Repo root: {REPO_ROOT}")
             print(f"Scripts dir: {SCRIPTS_DIR}")
             try:
@@ -29,10 +29,10 @@ def main() -> int:
 
                 sys.argv = [
                     str(REPO_ROOT / "scripts" / "resolve_inout_tools.py"),
-                    "silence",
+                    "speech",
                     "--render-audio",
                     "--config",
-                    str(REPO_ROOT / "examples" / "rough_cut_fast_youtube.json"),
+                    str(REPO_ROOT / "examples" / "speech_pauses_russian.json"),
                     "--timeline-fps",
                     "25",
                 ]

@@ -11,6 +11,9 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = REPO_ROOT / "resolve_scripts" / "Edit"
+DEPRECATED_MENU_SCRIPTS = [
+    "AVDR Silence InOut.py",
+]
 
 
 def default_target_dir() -> Path:
@@ -80,6 +83,8 @@ def main() -> int:
     if args.dry_run:
         print(f"Source: {SOURCE_DIR}")
         print(f"Target: {args.target_dir}")
+        for deprecated_name in DEPRECATED_MENU_SCRIPTS:
+            print(f"Would remove deprecated: {args.target_dir / deprecated_name}")
         for source_path in sorted(SOURCE_DIR.glob("*.py")):
             print(f"Would install: {args.target_dir / source_path.name}")
         return 0
@@ -87,6 +92,13 @@ def main() -> int:
     target_dir = args.target_dir.expanduser().resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
     installed = []
+    removed = []
+
+    for deprecated_name in DEPRECATED_MENU_SCRIPTS:
+        deprecated_path = target_dir / deprecated_name
+        if deprecated_path.exists():
+            deprecated_path.unlink()
+            removed.append(deprecated_path)
 
     for source_path in sorted(SOURCE_DIR.glob("*.py")):
         target_path = target_dir / source_path.name
@@ -95,6 +107,10 @@ def main() -> int:
         target_path.chmod(0o755)
         installed.append(target_path)
 
+    if removed:
+        print("Removed deprecated Resolve menu scripts:")
+        for path in removed:
+            print(f"- {path}")
     print("Installed Resolve menu scripts:")
     for path in installed:
         print(f"- {path}")

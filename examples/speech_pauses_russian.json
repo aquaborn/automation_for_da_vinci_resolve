@@ -1,0 +1,13 @@
+{
+  "model": "small",
+  "language": "ru",
+  "min_pause": 0.55,
+  "max_pause": 8.0,
+  "keep_before": 0.08,
+  "keep_after": 0.1,
+  "long_filler": 0.45,
+  "filler_words": ["э", "ээ", "эээ", "эм", "мм", "ммм", "а", "аа", "ааа", "ну", "типа", "короче"],
+  "pause_color": "Yellow",
+  "filler_color": "Orange",
+  "long_filler_color": "Red"
+}

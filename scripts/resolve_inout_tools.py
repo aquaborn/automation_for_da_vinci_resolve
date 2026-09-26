@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import beat_cut_markers
 import rough_cut_silence
+import speech_pause_markers
 
 
 def import_resolve_script_api():
@@ -173,6 +175,20 @@ def load_config(config_path: Path | None) -> dict[str, Any]:
         raise RuntimeError(f"Config file not found: {resolved}")
     with resolved.open(encoding="utf-8") as config_file:
         return json.load(config_file)
+
+
+def find_python3() -> str | None:
+    candidates = [
+        shutil.which("python3"),
+        shutil.which("python"),
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+        "/usr/bin/python3",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return str(candidate)
+    return None
 
 
 def get_marker_type_filter(config: dict[str, Any]) -> set[str] | None:
@@ -537,6 +553,113 @@ def command_beat(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_speech(args: argparse.Namespace) -> int:
+    _, project, timeline = get_resolve_context()
+    fps = get_timeline_fps(timeline, args.timeline_fps)
+    in_frame, out_frame = get_timeline_inout(timeline)
+    audio_path = resolve_audio_input(args, project, in_frame, out_frame, fps, "speech")
+
+    config = load_config(args.config)
+    analysis_args = argparse.Namespace(
+        audio=audio_path,
+        words_json=args.words_json,
+        output_dir=Path(config.get("output_dir", "reports/speech_pauses")),
+        model=args.model or config.get("model", "small"),
+        language=args.language if args.language is not None else config.get("language", "ru"),
+        min_pause=float(args.min_pause or config.get("min_pause", 0.55)),
+        max_pause=float(args.max_pause or config.get("max_pause", 8.0)),
+        keep_before=float(args.keep_before or config.get("keep_before", 0.08)),
+        keep_after=float(args.keep_after or config.get("keep_after", 0.10)),
+        long_filler=float(args.long_filler or config.get("long_filler", 0.45)),
+        filler_words=args.filler_words
+        or config.get(
+            "filler_words",
+            ["э", "ээ", "эээ", "эм", "мм", "ммм", "а", "аа", "ааа", "ну"],
+        ),
+        pause_color=config.get("pause_color", "Yellow"),
+        filler_color=config.get("filler_color", "Orange"),
+        long_filler_color=config.get("long_filler_color", "Red"),
+    )
+    try:
+        words, markers = speech_pause_markers.analyze_audio(analysis_args)
+    except RuntimeError as error:
+        if "No Whisper backend found" not in str(error):
+            raise
+        python_bin = find_python3()
+        if not python_bin:
+            raise
+
+        report_dir = Path(tempfile.mkdtemp(prefix="speech_pause_report_"))
+        command = [
+            python_bin,
+            str(SCRIPT_DIR / "speech_pause_markers.py"),
+            str(audio_path),
+            "--output-dir",
+            str(report_dir),
+        ]
+        if args.config:
+            command.extend(["--config", str(args.config)])
+        if args.words_json:
+            command.extend(["--words-json", str(args.words_json)])
+
+        print("Whisper backend was not found inside Resolve Python.")
+        print(f"Trying external Python: {python_bin}")
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        if result.returncode != 0:
+            raise RuntimeError(
+                "External speech pause analyzer failed. Install Whisper in system "
+                "Python with `python3 -m pip install faster-whisper`."
+            )
+
+        report_path = report_dir / f"{audio_path.stem}.speech_pauses.json"
+        with report_path.open(encoding="utf-8") as report_file:
+            payload = json.load(report_file)
+        words = [speech_pause_markers.SpeechWord("", 0.0, 0.0)] * int(
+            payload.get("summary", {}).get("word_count", 0)
+        )
+        markers = [
+            speech_pause_markers.SpeechMarker(
+                time=float(item["time"]),
+                duration=float(item["duration"]),
+                marker_type=str(item["marker_type"]),
+                label=str(item["label"]),
+                note=str(item["note"]),
+                color=str(item["color"]),
+            )
+            for item in payload.get("markers", [])
+        ]
+
+    added = 0
+    for marker in markers:
+        frame = in_frame + int(round(marker.time * fps))
+        if frame > out_frame:
+            continue
+        note = (
+            f"In/Out local time: {seconds_to_timecode(marker.time)}. "
+            f"Timeline: {frame_to_timecode(frame, fps)}. {marker.note}"
+        )
+        if add_timeline_marker(
+            timeline,
+            frame,
+            marker.color,
+            marker.label,
+            note,
+            int(round(marker.duration * fps)),
+        ):
+            added += 1
+
+    print(f"In/Out frames: {in_frame}-{out_frame}")
+    print(f"Audio analyzed: {audio_path}")
+    print(f"Words: {len(words)}")
+    print(f"Speech markers found: {len(markers)}")
+    print(f"Resolve markers added: {added}")
+    return 0
+
+
 def add_common_audio_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--audio",
@@ -602,6 +725,19 @@ def build_parser() -> argparse.ArgumentParser:
     beat.add_argument("--cut-marker-color", default=None)
     beat.add_argument("--drop-marker-color", default=None)
     beat.set_defaults(func=command_beat)
+
+    speech = subparsers.add_parser("speech", help="Add Whisper speech pause markers")
+    add_common_audio_args(speech)
+    speech.add_argument("--words-json", type=Path, default=None)
+    speech.add_argument("--model", default=None)
+    speech.add_argument("--language", default=None)
+    speech.add_argument("--min-pause", type=float, default=None)
+    speech.add_argument("--max-pause", type=float, default=None)
+    speech.add_argument("--keep-before", type=float, default=None)
+    speech.add_argument("--keep-after", type=float, default=None)
+    speech.add_argument("--long-filler", type=float, default=None)
+    speech.add_argument("--filler-words", nargs="*", default=None)
+    speech.set_defaults(func=command_speech)
 
     return parser
 
